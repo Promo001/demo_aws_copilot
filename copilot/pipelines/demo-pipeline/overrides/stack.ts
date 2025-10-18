@@ -52,7 +52,7 @@ export class TransformedStack extends cdk.Stack {
         sourceAction.configuration = {
             ...(sourceAction.configuration || {}),
             BranchName: (sourceAction.configuration && sourceAction.configuration.BranchName) || 'main',
-            DetectChanges: false,
+            DetectChanges: 'false',
         };
     }
 
@@ -79,7 +79,7 @@ export class TransformedStack extends cdk.Stack {
         sourceAction.configuration = {
             ...sourceAction.configuration,
             BranchName: sourceAction.configuration?.BranchName ?? 'main',
-            DetectChanges: false,
+            DetectChanges: 'false',
         };
 
         // Add the Triggers override with tag/branch filters
@@ -93,8 +93,6 @@ export class TransformedStack extends cdk.Stack {
                             Tags: {
                                 Includes: ['release-*'],
                             },
-                        },
-                        {
                             Branches: {
                                 Includes: ['main'],
                                 Excludes: ['feature-*'],
