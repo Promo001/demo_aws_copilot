@@ -17,6 +17,7 @@ phases:
       - ls -l
       - export COLOR="false"
       - export CI="true"
+      - echo "SOURCE_REF_TYPE=$SOURCE_REF_TYPE SOURCE_REF_NAME=$SOURCE_REF_NAME"
       - pipeline=$(cat $CODEBUILD_SRC_DIR/copilot/pipelines/demo-pipeline/manifest.yml | ruby -ryaml -rjson -e 'puts JSON.pretty_generate(YAML.load(ARGF))')
       - pl_envs=$(echo $pipeline | jq -r '.stages[].name')
       # Find all the local services in the workspace.
@@ -40,14 +41,32 @@ phases:
           exit 1;
         fi
       # Generate the cloudformation templates.
-      # The tag is the build ID but we replaced the colon ':' with a dash '-'.
+      # Prefer tag from SourceVariables if present. For GitHub tags, ReferenceType=TAG and ReferenceName like "refs/tags/v1.2.3" or "v1.2.3".
+      - >
+        ref_name=${SOURCE_REF_NAME:-}; ref_type=${SOURCE_REF_TYPE:-};
+        echo "Evaluating tag from SourceVariables: type='$ref_type' name='$ref_name'";
+        if [ "$ref_type" = "TAG" ] && [ -n "$ref_name" ]; then
+          # Strip optional refs/tags/ prefix
+          git_tag=$(echo "$ref_name" | sed -E 's#^refs/tags/##');
+          echo "Derived git_tag='$git_tag' from ref_name";
+        else
+          echo "No git tag detected from SourceVariables";
+        fi
+      # The tag is the build ID but we replaced the colon ':' with a dash '-' if no git tag.
       # We truncate the tag (from the front) to 128 characters, the limit for Docker tags
       # (https://docs.docker.com/engine/reference/commandline/tag/)
       # Check if the `svc package` commanded exited with a non-zero status. If so, echo error msg and exit.
       - >
         for env in $pl_envs; do
-          tag=$(echo ${CODEBUILD_BUILD_ID##*:}-$env | sed 's/:/-/g' | rev | cut -c 1-128 | rev)
+          if [ -n "$git_tag" ]; then
+            tag=$git_tag
+            echo "Using git tag: $tag for env=$env";
+          else
+            tag=$(echo ${CODEBUILD_BUILD_ID##*:}-$env | sed 's/:/-/g' | rev | cut -c 1-128 | rev)
+            echo "Using fallback build tag: $tag for env=$env";
+          fi
           for svc in $svcs; do
+          echo "Packaging service '$svc' for env '$env' with tag '$tag'";
           ./copilot-linux svc package -n $svc -e $env --output-dir './infrastructure' --tag $tag --upload-assets;
           if [ $? -ne 0 ]; then
             echo "Cloudformation stack and config files were not generated. Please check build logs to see if there was a manifest validation error." 1>&2;
@@ -55,6 +74,7 @@ phases:
           fi
           done;
           for job in $jobs; do
+          echo "Packaging job '$job' for env '$env' with tag '$tag'";
           ./copilot-linux job package -n $job -e $env --output-dir './infrastructure' --tag $tag --upload-assets;
           if [ $? -ne 0 ]; then
             echo "Cloudformation stack and config files were not generated. Please check build logs to see if there was a manifest validation error." 1>&2;

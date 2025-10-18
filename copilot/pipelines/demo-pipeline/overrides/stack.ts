@@ -19,6 +19,7 @@ export class TransformedStack extends cdk.Stack {
         this.transformSourceConnection();
         this.transformPipelineTriggers();
         this.addTriggersForTagsOnly();
+        this.propagateSourceVarsToBuild();
     }
     
     // TODO: implement me.
@@ -54,6 +55,8 @@ export class TransformedStack extends cdk.Stack {
             BranchName: (sourceAction.configuration && sourceAction.configuration.BranchName) || 'main',
             DetectChanges: 'false',
         };
+        // Expose source variables to downstream actions via a namespace
+        (sourceAction as any).namespace = 'SourceVariables';
     }
 
     // Configure native CodePipeline triggers to run only on Git tags.
@@ -91,7 +94,7 @@ export class TransformedStack extends cdk.Stack {
                     Push: [
                         {
                             Tags: {
-                                Includes: ['release-*'],
+                                Includes: ['v*'],
                             },
                         },
                     ],
@@ -99,6 +102,46 @@ export class TransformedStack extends cdk.Stack {
                 ProviderType: 'CodeStarSourceConnection',
             },
         ]);
+    }
+
+    // Make SourceVariables.ReferenceName/ReferenceType available to CodeBuild as env vars
+    propagateSourceVarsToBuild() {
+        const pipeline = this.template.getResource("Pipeline") as codepipeline.CfnPipeline;
+        const stagesProp = (pipeline as any).stages;
+        if (!Array.isArray(stagesProp)) {
+            return;
+        }
+        const buildStage = (stagesProp as any[]).find((stage: any) => stage && stage.name === 'Build');
+        if (!buildStage || !Array.isArray(buildStage.actions) || buildStage.actions.length === 0) {
+            return;
+        }
+        const buildAction: any = buildStage.actions[0];
+        const cfg = buildAction.configuration || {};
+
+        let envs: any[] = [];
+        try {
+            if (cfg.EnvironmentVariables) {
+                envs = JSON.parse(cfg.EnvironmentVariables);
+                if (!Array.isArray(envs)) envs = [];
+            }
+        } catch {
+            envs = [];
+        }
+
+        const upsert = (name: string, value: string) => {
+            const idx = envs.findIndex((e: any) => e && e.name === name);
+            const entry = { name, type: 'PLAINTEXT', value };
+            if (idx >= 0) envs[idx] = entry; else envs.push(entry);
+        };
+
+        // CodePipeline SourceVariables
+        upsert('SOURCE_REF_NAME', '#{SourceVariables.ReferenceName}');
+        upsert('SOURCE_REF_TYPE', '#{SourceVariables.ReferenceType}');
+
+        buildAction.configuration = {
+            ...cfg,
+            EnvironmentVariables: JSON.stringify(envs),
+        };
     }
     
 }
