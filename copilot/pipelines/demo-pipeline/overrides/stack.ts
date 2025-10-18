@@ -143,6 +143,9 @@ export class TransformedStack extends cdk.Stack {
         // SOURCE_BRANCH_NAME will be 'refs/heads/<branch>' or 'refs/tags/<tag>' for tag pushes
         upsert('SOURCE_BRANCH_NAME', '#{SourceVariables.BranchName}');
 
+        // Also provide the CodePipeline execution id so build can query trigger details
+        upsert('PIPELINE_EXECUTION_ID', '#{codepipeline.PipelineExecutionId}');
+
         buildAction.configuration = {
             ...cfg,
             EnvironmentVariables: JSON.stringify(envs),

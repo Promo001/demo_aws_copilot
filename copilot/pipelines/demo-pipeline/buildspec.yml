@@ -17,7 +17,7 @@ phases:
       - ls -l
       - export COLOR="false"
       - export CI="true"
-      - echo "SOURCE_BRANCH_NAME=$SOURCE_BRANCH_NAME CODEBUILD_SOURCE_VERSION=$CODEBUILD_SOURCE_VERSION"
+      - echo "SOURCE_BRANCH_NAME=$SOURCE_BRANCH_NAME CODEBUILD_SOURCE_VERSION=$CODEBUILD_SOURCE_VERSION PIPELINE_EXECUTION_ID=$PIPELINE_EXECUTION_ID"
       - pipeline=$(cat $CODEBUILD_SRC_DIR/copilot/pipelines/demo-pipeline/manifest.yml | ruby -ryaml -rjson -e 'puts JSON.pretty_generate(YAML.load(ARGF))')
       - pl_envs=$(echo $pipeline | jq -r '.stages[].name')
       # Find all the local services in the workspace.
@@ -43,7 +43,7 @@ phases:
       # Determine tag: prefer SOURCE_BRANCH_NAME if it carries refs/tags/*; else fallback to CODEBUILD_SOURCE_VERSION; else fallback to build ID
       - >
         git_tag="";
-        if echo "$SOURCE_BRANCH_NAME" | grep -q '^refs/tags/'; then
+        if [ -n "$SOURCE_BRANCH_NAME" ] && echo "$SOURCE_BRANCH_NAME" | grep -q '^refs/tags/'; then
           git_tag=$(echo "$SOURCE_BRANCH_NAME" | sed -E 's#^refs/tags/##');
           echo "Detected tag from SOURCE_BRANCH_NAME: $git_tag";
         elif echo "$CODEBUILD_SOURCE_VERSION" | grep -q '^refs/tags/'; then
