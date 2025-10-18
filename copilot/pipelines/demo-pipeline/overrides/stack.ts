@@ -93,10 +93,6 @@ export class TransformedStack extends cdk.Stack {
                             Tags: {
                                 Includes: ['release-*'],
                             },
-                            Branches: {
-                                Includes: ['main'],
-                                Excludes: ['feature-*'],
-                            },
                         },
                     ],
                 },
