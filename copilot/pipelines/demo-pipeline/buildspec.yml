@@ -40,20 +40,28 @@ phases:
           echo "No services or jobs found for the pipeline to deploy. Please create at least one service or job and push the manifest to the remote." 1>&2;
           exit 1;
         fi
-      # Determine tag: prefer SOURCE_REF_* if provided by pipeline namespace; else fall back to CODEBUILD_SOURCE_VERSION; else fallback to build ID
+      # Determine tag: prefer git describe when .git is present (using CODEBUILD_CLONE_REF); else fall back to SOURCE_REF_* or CODEBUILD_SOURCE_VERSION; else fallback to build ID
       - >
         git_tag="";
-        if [ "$SOURCE_REF_TYPE" = "TAG" ] && [ -n "$SOURCE_REF_NAME" ]; then
-          git_tag=$(echo "$SOURCE_REF_NAME" | sed -E 's#^refs/tags/##');
-          echo "Detected tag from SOURCE_REF_*: $git_tag";
-        elif echo "$CODEBUILD_SOURCE_VERSION" | grep -q '^refs/tags/'; then
-          git_tag=$(echo "$CODEBUILD_SOURCE_VERSION" | sed -E 's#^refs/tags/##');
-          echo "Detected tag from CODEBUILD_SOURCE_VERSION (refs): $git_tag";
-        elif echo "$CODEBUILD_SOURCE_VERSION" | grep -Eq '^[vV]?[0-9]'; then
-          git_tag="$CODEBUILD_SOURCE_VERSION";
-          echo "Detected tag from CODEBUILD_SOURCE_VERSION (raw): $git_tag";
-        else
-          echo "No tag detected from SOURCE_REF_* or CODEBUILD_SOURCE_VERSION: $CODEBUILD_SOURCE_VERSION";
+        if [ -d .git ]; then
+          echo "Git metadata detected; attempting to use git describe";
+          git fetch --tags --force || true;
+          git_tag=$(git describe --tags --exact-match 2>/dev/null || git describe --tags --abbrev=0 2>/dev/null || true);
+          if [ -n "$git_tag" ]; then echo "Detected tag from git describe: $git_tag"; fi
+        fi
+        if [ -z "$git_tag" ]; then
+          if [ "$SOURCE_REF_TYPE" = "TAG" ] && [ -n "$SOURCE_REF_NAME" ]; then
+            git_tag=$(echo "$SOURCE_REF_NAME" | sed -E 's#^refs/tags/##');
+            echo "Detected tag from SOURCE_REF_*: $git_tag";
+          elif echo "$CODEBUILD_SOURCE_VERSION" | grep -q '^refs/tags/'; then
+            git_tag=$(echo "$CODEBUILD_SOURCE_VERSION" | sed -E 's#^refs/tags/##');
+            echo "Detected tag from CODEBUILD_SOURCE_VERSION (refs): $git_tag";
+          elif echo "$CODEBUILD_SOURCE_VERSION" | grep -Eq '^[vV]?[0-9]'; then
+            git_tag="$CODEBUILD_SOURCE_VERSION";
+            echo "Detected tag from CODEBUILD_SOURCE_VERSION (raw): $git_tag";
+          else
+            echo "No tag detected via git or environment; will use fallback";
+          fi
         fi
       # The tag is the build ID but we replaced the colon ':' with a dash '-' if no git tag.
       # We truncate the tag (from the front) to 128 characters, the limit for Docker tags

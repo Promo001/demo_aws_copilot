@@ -54,6 +54,7 @@ export class TransformedStack extends cdk.Stack {
             ...(sourceAction.configuration || {}),
             BranchName: (sourceAction.configuration && sourceAction.configuration.BranchName) || 'main',
             DetectChanges: 'false',
+            OutputArtifactFormat: 'CODEBUILD_CLONE_REF',
         };
         // Expose source variables to downstream actions via a namespace
         (sourceAction as any).namespace = 'SourceVariables';
