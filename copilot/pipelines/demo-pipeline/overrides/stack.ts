@@ -54,7 +54,6 @@ export class TransformedStack extends cdk.Stack {
             ...(sourceAction.configuration || {}),
             BranchName: (sourceAction.configuration && sourceAction.configuration.BranchName) || 'main',
             DetectChanges: 'false',
-            OutputArtifactFormat: 'CODEBUILD_CLONE_REF',
         };
         // Expose source variables to downstream actions via a namespace
         (sourceAction as any).namespace = 'SourceVariables';
@@ -131,6 +130,18 @@ export class TransformedStack extends cdk.Stack {
 
         // Remove any variables that might reference unavailable pipeline namespaces/keys
         envs = envs.filter((e: any) => e && e.name !== 'SOURCE_REF_NAME' && e.name !== 'SOURCE_REF_TYPE');
+
+        // Upsert helper
+        const upsert = (name: string, value: string) => {
+            const idx = envs.findIndex((e: any) => e && e.name === name);
+            const entry = { name, type: 'PLAINTEXT', value };
+            if (idx >= 0) envs[idx] = entry; else envs.push(entry);
+        };
+
+        // Provide a documented GitHub output variable from Source action
+        // See: https://docs.aws.amazon.com/codepipeline/latest/userguide/actions-variables.html
+        // SOURCE_BRANCH_NAME will be 'refs/heads/<branch>' or 'refs/tags/<tag>' for tag pushes
+        upsert('SOURCE_BRANCH_NAME', '#{SourceVariables.BranchName}');
 
         buildAction.configuration = {
             ...cfg,
