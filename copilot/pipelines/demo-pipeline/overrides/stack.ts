@@ -104,7 +104,7 @@ export class TransformedStack extends cdk.Stack {
         ]);
     }
 
-    // Make SourceVariables.ReferenceName/ReferenceType available to CodeBuild as env vars
+    // Ensure Build action environment variables do not reference unavailable pipeline variables.
     propagateSourceVarsToBuild() {
         const pipeline = this.template.getResource("Pipeline") as codepipeline.CfnPipeline;
         const stagesProp = (pipeline as any).stages;
@@ -128,15 +128,8 @@ export class TransformedStack extends cdk.Stack {
             envs = [];
         }
 
-        const upsert = (name: string, value: string) => {
-            const idx = envs.findIndex((e: any) => e && e.name === name);
-            const entry = { name, type: 'PLAINTEXT', value };
-            if (idx >= 0) envs[idx] = entry; else envs.push(entry);
-        };
-
-        // CodePipeline SourceVariables
-        upsert('SOURCE_REF_NAME', '#{SourceVariables.ReferenceName}');
-        upsert('SOURCE_REF_TYPE', '#{SourceVariables.ReferenceType}');
+        // Remove any variables that might reference unavailable pipeline namespaces/keys
+        envs = envs.filter((e: any) => e && e.name !== 'SOURCE_REF_NAME' && e.name !== 'SOURCE_REF_TYPE');
 
         buildAction.configuration = {
             ...cfg,

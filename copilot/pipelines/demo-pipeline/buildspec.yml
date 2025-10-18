@@ -17,7 +17,7 @@ phases:
       - ls -l
       - export COLOR="false"
       - export CI="true"
-      - echo "SOURCE_REF_TYPE=$SOURCE_REF_TYPE SOURCE_REF_NAME=$SOURCE_REF_NAME"
+      - echo "SOURCE_REF_TYPE=$SOURCE_REF_TYPE SOURCE_REF_NAME=$SOURCE_REF_NAME CODEBUILD_SOURCE_VERSION=$CODEBUILD_SOURCE_VERSION"
       - pipeline=$(cat $CODEBUILD_SRC_DIR/copilot/pipelines/demo-pipeline/manifest.yml | ruby -ryaml -rjson -e 'puts JSON.pretty_generate(YAML.load(ARGF))')
       - pl_envs=$(echo $pipeline | jq -r '.stages[].name')
       # Find all the local services in the workspace.
@@ -40,17 +40,20 @@ phases:
           echo "No services or jobs found for the pipeline to deploy. Please create at least one service or job and push the manifest to the remote." 1>&2;
           exit 1;
         fi
-      # Generate the cloudformation templates.
-      # Prefer tag from SourceVariables if present. For GitHub tags, ReferenceType=TAG and ReferenceName like "refs/tags/v1.2.3" or "v1.2.3".
+      # Determine tag: prefer SOURCE_REF_* if provided by pipeline namespace; else fall back to CODEBUILD_SOURCE_VERSION; else fallback to build ID
       - >
-        ref_name=${SOURCE_REF_NAME:-}; ref_type=${SOURCE_REF_TYPE:-};
-        echo "Evaluating tag from SourceVariables: type='$ref_type' name='$ref_name'";
-        if [ "$ref_type" = "TAG" ] && [ -n "$ref_name" ]; then
-          # Strip optional refs/tags/ prefix
-          git_tag=$(echo "$ref_name" | sed -E 's#^refs/tags/##');
-          echo "Derived git_tag='$git_tag' from ref_name";
+        git_tag="";
+        if [ "$SOURCE_REF_TYPE" = "TAG" ] && [ -n "$SOURCE_REF_NAME" ]; then
+          git_tag=$(echo "$SOURCE_REF_NAME" | sed -E 's#^refs/tags/##');
+          echo "Detected tag from SOURCE_REF_*: $git_tag";
+        elif echo "$CODEBUILD_SOURCE_VERSION" | grep -q '^refs/tags/'; then
+          git_tag=$(echo "$CODEBUILD_SOURCE_VERSION" | sed -E 's#^refs/tags/##');
+          echo "Detected tag from CODEBUILD_SOURCE_VERSION (refs): $git_tag";
+        elif echo "$CODEBUILD_SOURCE_VERSION" | grep -Eq '^[vV]?[0-9]'; then
+          git_tag="$CODEBUILD_SOURCE_VERSION";
+          echo "Detected tag from CODEBUILD_SOURCE_VERSION (raw): $git_tag";
         else
-          echo "No git tag detected from SourceVariables";
+          echo "No tag detected from SOURCE_REF_* or CODEBUILD_SOURCE_VERSION: $CODEBUILD_SOURCE_VERSION";
         fi
       # The tag is the build ID but we replaced the colon ':' with a dash '-' if no git tag.
       # We truncate the tag (from the front) to 128 characters, the limit for Docker tags
