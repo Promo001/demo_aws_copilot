@@ -14,13 +14,8 @@ phases:
       # - make test
   post_build:
     commands:
-      - ls -l
-      - ls -lah
-      - ls -lah .git
-      - git --version || true
       - export COLOR="false"
       - export CI="true"
-      - echo "SOURCE_BRANCH_NAME=$SOURCE_BRANCH_NAME CODEBUILD_SOURCE_VERSION=$CODEBUILD_SOURCE_VERSION PIPELINE_EXECUTION_ID=$PIPELINE_EXECUTION_ID CODEBUILD_INITIATOR=$CODEBUILD_INITIATOR"
       - pipeline=$(cat $CODEBUILD_SRC_DIR/copilot/pipelines/demo-pipeline/manifest.yml | ruby -ryaml -rjson -e 'puts JSON.pretty_generate(YAML.load(ARGF))')
       - pl_envs=$(echo $pipeline | jq -r '.stages[].name')
       # Find all the local services in the workspace.
@@ -43,47 +38,25 @@ phases:
           echo "No services or jobs found for the pipeline to deploy. Please create at least one service or job and push the manifest to the remote." 1>&2;
           exit 1;
         fi
-      # Determine tag: prefer SOURCE_BRANCH_NAME if it carries refs/tags/*; else CODEBUILD_SOURCE_VERSION; else query CodePipeline triggerDetail; else fallback to build ID
+      # Determine tag only from Git metadata: tag at HEAD, else short commit SHA
       - >
         git_tag="";
-        if [ -n "$SOURCE_BRANCH_NAME" ] && echo "$SOURCE_BRANCH_NAME" | grep -q '^refs/tags/'; then
-          git_tag=$(echo "$SOURCE_BRANCH_NAME" | sed -E 's#^refs/tags/##');
-          echo "Detected tag from SOURCE_BRANCH_NAME: $git_tag";
-        elif echo "$CODEBUILD_SOURCE_VERSION" | grep -q '^refs/tags/'; then
-          git_tag=$(echo "$CODEBUILD_SOURCE_VERSION" | sed -E 's#^refs/tags/##');
-          echo "Detected tag from CODEBUILD_SOURCE_VERSION (refs): $git_tag";
-        else
-          if [ -n "$PIPELINE_EXECUTION_ID" ] && [ -n "$CODEBUILD_INITIATOR" ]; then
-            PIPELINE_NAME=$(echo "$CODEBUILD_INITIATOR" | sed -E 's#^codepipeline/##');
-            echo "Attempting to fetch tag from CodePipeline execution: $PIPELINE_NAME / $PIPELINE_EXECUTION_ID";
-            detail=$(aws codepipeline get-pipeline-execution --pipeline-name "$PIPELINE_NAME" --pipeline-execution-id "$PIPELINE_EXECUTION_ID" --query 'pipelineExecution.trigger.triggerDetail' --output json 2>/dev/null || true);
-            tag_from_api=$(echo "$detail" | jq -r '.tagName // empty' 2>/dev/null || true);
-            if [ -n "$tag_from_api" ]; then
-              git_tag="$tag_from_api";
-              echo "Detected tag from CodePipeline triggerDetail: $git_tag";
-            fi
-          fi
-          if [ -z "$git_tag" ] && echo "$CODEBUILD_SOURCE_VERSION" | grep -Ek '^[vV]?[0-9]'; then
-            git_tag="$CODEBUILD_SOURCE_VERSION";
-            echo "Detected tag from CODEBUILD_SOURCE_VERSION (raw): $git_tag";
-          fi
-          if [ -z "$git_tag" ]; then
-            echo "No tag detected via SOURCE_BRANCH_NAME, CODEBUILD_SOURCE_VERSION, or CodePipeline API; will use fallback";
-          fi
-        fi
-      - >
-        if [ -z "$git_tag" ] && [ -d .git ]; then
-          echo "Attempting to derive tag from Git metadata in .git";
-          git --version || true;
-          tag_from_head=$(git tag --points-at HEAD | head -n1 || true);
-          if [ -n "$tag_from_head" ]; then
-            git_tag="$tag_from_head";
+        if [ -d .git ]; then
+          exact_tag=$(git describe --tags --exact-match 2>/dev/null || true);
+          if [ -n "$exact_tag" ]; then
+            git_tag="$exact_tag";
             echo "Detected tag pointing at HEAD: $git_tag";
           else
-            commit_sha=$(git rev-parse --short HEAD 2>/dev/null || true);
-            if [ -n "$commit_sha" ]; then
-              git_tag="$commit_sha";
-              echo "Detected commit SHA: $git_tag";
+            tag_from_head=$(git tag --points-at HEAD | head -n1 || true);
+            if [ -n "$tag_from_head" ]; then
+              git_tag="$tag_from_head";
+              echo "Detected tag pointing at HEAD: $git_tag";
+            else
+              commit_sha=$(git rev-parse --short HEAD 2>/dev/null || true);
+              if [ -n "$commit_sha" ]; then
+                git_tag="$commit_sha";
+                echo "Detected commit SHA: $git_tag";
+              fi
             fi
           fi
         fi

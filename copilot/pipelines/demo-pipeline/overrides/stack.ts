@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as path from 'path';
-import { aws_codestarconnections as codestarconnections, aws_codepipeline as codepipeline } from 'aws-cdk-lib';
+import { aws_codepipeline as codepipeline } from 'aws-cdk-lib';
 
 interface TransformedStackProps extends cdk.StackProps {
     readonly appName: string;
@@ -16,19 +16,10 @@ export class TransformedStack extends cdk.Stack {
             templateFile: path.join('.build', 'in.yml'),
         });
         this.appName = props.appName;
-        this.transformSourceConnection();
         this.transformPipelineTriggers();
         this.addTriggersForTagsOnly();
-        this.propagateSourceVarsToBuild();
     }
     
-    // TODO: implement me.
-    transformSourceConnection() {
-        const sourceConnection = this.template.getResource("SourceConnection") as codestarconnections.CfnConnection;
-        // Configure the source connection as needed
-        // This method can be used to modify connection properties if required
-    }
-
     transformPipelineTriggers() {
         // Get the pipeline resource from the template
         const pipeline = this.template.getResource("Pipeline") as codepipeline.CfnPipeline;
@@ -48,15 +39,15 @@ export class TransformedStack extends cdk.Stack {
         }
         const sourceAction = (actionsProp as any[])[0];
 
-        // Disable default branch-based change detection and lock to main branch
-        // For CodeStar Connections source actions, the supported flag is DetectChanges
+        // Enforce full clone for CodeBuild and disable default change detection.
+        // Also lock to main branch to match manifest/settings.
         sourceAction.configuration = {
             ...(sourceAction.configuration || {}),
             BranchName: (sourceAction.configuration && sourceAction.configuration.BranchName) || 'main',
             DetectChanges: 'false',
+            OutputArtifactFormat: 'CODEBUILD_CLONE_REF',
         };
-        // Expose source variables to downstream actions via a namespace
-        (sourceAction as any).namespace = 'SourceVariables';
+        // Namespace not required for git-only buildspec flow
     }
 
     // Configure native CodePipeline triggers to run only on Git tags.
@@ -78,13 +69,6 @@ export class TransformedStack extends cdk.Stack {
         }
         const sourceAction: any = (actionsProp as any[])[0];
 
-        // Disable default automated change detection and keep BranchName for manual runs (equivalent to triggerOnPush: false)
-        sourceAction.configuration = {
-            ...sourceAction.configuration,
-            BranchName: sourceAction.configuration?.BranchName ?? 'main',
-            DetectChanges: 'false',
-        };
-
         // Add the Triggers override with tag/branch filters
         const sourceActionName = sourceAction.name ?? 'Source';
         pipeline.addPropertyOverride('Triggers', [
@@ -102,54 +86,5 @@ export class TransformedStack extends cdk.Stack {
                 ProviderType: 'CodeStarSourceConnection',
             },
         ]);
-    }
-
-    // Ensure Build action environment variables do not reference unavailable pipeline variables.
-    propagateSourceVarsToBuild() {
-        const pipeline = this.template.getResource("Pipeline") as codepipeline.CfnPipeline;
-        const stagesProp = (pipeline as any).stages;
-        if (!Array.isArray(stagesProp)) {
-            return;
-        }
-        const buildStage = (stagesProp as any[]).find((stage: any) => stage && stage.name === 'Build');
-        if (!buildStage || !Array.isArray(buildStage.actions) || buildStage.actions.length === 0) {
-            return;
-        }
-        const buildAction: any = buildStage.actions[0];
-        const cfg = buildAction.configuration || {};
-
-        let envs: any[] = [];
-        try {
-            if (cfg.EnvironmentVariables) {
-                envs = JSON.parse(cfg.EnvironmentVariables);
-                if (!Array.isArray(envs)) envs = [];
-            }
-        } catch {
-            envs = [];
-        }
-
-        // Remove any variables that might reference unavailable pipeline namespaces/keys
-        envs = envs.filter((e: any) => e && e.name !== 'SOURCE_REF_NAME' && e.name !== 'SOURCE_REF_TYPE');
-
-        // Upsert helper
-        const upsert = (name: string, value: string) => {
-            const idx = envs.findIndex((e: any) => e && e.name === name);
-            const entry = { name, type: 'PLAINTEXT', value };
-            if (idx >= 0) envs[idx] = entry; else envs.push(entry);
-        };
-
-        // Provide a documented GitHub output variable from Source action
-        // See: https://docs.aws.amazon.com/codepipeline/latest/userguide/actions-variables.html
-        // SOURCE_BRANCH_NAME will be 'refs/heads/<branch>' or 'refs/tags/<tag>' for tag pushes
-        upsert('SOURCE_BRANCH_NAME', '#{SourceVariables.BranchName}');
-
-        // Also provide the CodePipeline execution id so build can query trigger details
-        upsert('PIPELINE_EXECUTION_ID', '#{codepipeline.PipelineExecutionId}');
-
-        buildAction.configuration = {
-            ...cfg,
-            EnvironmentVariables: JSON.stringify(envs),
-        };
-    }
-    
+    }    
 }
