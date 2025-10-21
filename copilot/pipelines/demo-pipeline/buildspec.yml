@@ -17,6 +17,7 @@ phases:
       - ls -l
       - ls -lah
       - ls -lah .git
+      - git --version || true
       - export COLOR="false"
       - export CI="true"
       - echo "SOURCE_BRANCH_NAME=$SOURCE_BRANCH_NAME CODEBUILD_SOURCE_VERSION=$CODEBUILD_SOURCE_VERSION PIPELINE_EXECUTION_ID=$PIPELINE_EXECUTION_ID CODEBUILD_INITIATOR=$CODEBUILD_INITIATOR"
@@ -68,6 +69,22 @@ phases:
           fi
           if [ -z "$git_tag" ]; then
             echo "No tag detected via SOURCE_BRANCH_NAME, CODEBUILD_SOURCE_VERSION, or CodePipeline API; will use fallback";
+          fi
+        fi
+      - >
+        if [ -z "$git_tag" ] && [ -d .git ]; then
+          echo "Attempting to derive tag from Git metadata in .git";
+          git --version || true;
+          tag_from_head=$(git tag --points-at HEAD | head -n1 || true);
+          if [ -n "$tag_from_head" ]; then
+            git_tag="$tag_from_head";
+            echo "Detected tag pointing at HEAD: $git_tag";
+          else
+            commit_sha=$(git rev-parse --short HEAD 2>/dev/null || true);
+            if [ -n "$commit_sha" ]; then
+              git_tag="$commit_sha";
+              echo "Detected commit SHA: $git_tag";
+            fi
           fi
         fi
       # The tag is the build ID but we replaced the colon ':' with a dash '-' if no git tag.
